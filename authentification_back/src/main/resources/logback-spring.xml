@@ -1,0 +1,29 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  Logback : configuration du logging
+  Objectif : écrire les logs en console ET dans logs/auth-server.log
+  Pattern : date | thread | level | logger | message
+  IMPORTANT : ne jamais logger les mots de passe !
+-->
+<configuration>
+    <!-- Console : affichage dans le terminal -->
+    <appender name="CONSOLE" class="ch.qos.logback.core.ConsoleAppender">
+        <encoder>
+            <pattern>%d{yyyy-MM-dd HH:mm:ss} [%thread] %-5level %logger{36} - %msg%n</pattern>
+            <charset>UTF-8</charset>
+        </encoder>
+    </appender>
+    <!-- Fichier : logs/auth-server.log pour archivage -->
+    <appender name="FILE" class="ch.qos.logback.core.FileAppender">
+        <file>logs/auth-server.log</file>
+        <encoder>
+            <pattern>%d{yyyy-MM-dd HH:mm:ss} [%thread] %-5level %logger{36} - %msg%n</pattern>
+            <charset>UTF-8</charset>
+        </encoder>
+    </appender>
+
+    <root level="INFO">
+        <appender-ref ref="CONSOLE"/>
+        <appender-ref ref="FILE"/>
+    </root>
+</configuration>
