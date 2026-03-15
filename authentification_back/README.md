@@ -70,9 +70,13 @@ src/main/java/com/example/authentification/
 **Explication :**
 - `spring-boot-starter-data-jpa` : accès base de données avec JPA/Hibernate
 - `spring-boot-starter-webmvc` : API REST (contrôleurs, JSON)
+- `spring-boot-h2console` : console H2 pour debug (optionnel)
+- `spring-boot-devtools` : rechargement à chaud en développement
 - `mysql-connector-j` : pilote MySQL (scope runtime)
 - `h2` : base en mémoire pour les tests
+- `lombok` : réduction du code boilerplate (getters, etc.)
 - `spring-boot-starter-test` et `spring-boot-starter-webmvc-test` : JUnit, MockMvc
+- **Build** : maven-compiler-plugin (annotation processor Lombok), spring-boot-maven-plugin, sonar-maven-plugin, jacoco-maven-plugin (couverture de tests)
 
 ```xml
 <?xml version="1.0" encoding="UTF-8"?>
@@ -89,10 +93,15 @@ src/main/java/com/example/authentification/
     <artifactId>authentification</artifactId>
     <version>0.0.1-SNAPSHOT</version>
     <name>authentification</name>
+    <description>authentification java</description>
     <properties>
         <java.version>17</java.version>
     </properties>
     <dependencies>
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-h2console</artifactId>
+        </dependency>
         <dependency>
             <groupId>org.springframework.boot</groupId>
             <artifactId>spring-boot-starter-data-jpa</artifactId>
@@ -102,14 +111,25 @@ src/main/java/com/example/authentification/
             <artifactId>spring-boot-starter-webmvc</artifactId>
         </dependency>
         <dependency>
-            <groupId>com.mysql</groupId>
-            <artifactId>mysql-connector-j</artifactId>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-devtools</artifactId>
             <scope>runtime</scope>
+            <optional>true</optional>
         </dependency>
         <dependency>
             <groupId>com.h2database</groupId>
             <artifactId>h2</artifactId>
             <scope>runtime</scope>
+        </dependency>
+        <dependency>
+            <groupId>com.mysql</groupId>
+            <artifactId>mysql-connector-j</artifactId>
+            <scope>runtime</scope>
+        </dependency>
+        <dependency>
+            <groupId>org.projectlombok</groupId>
+            <artifactId>lombok</artifactId>
+            <optional>true</optional>
         </dependency>
         <dependency>
             <groupId>org.springframework.boot</groupId>
@@ -122,6 +142,53 @@ src/main/java/com/example/authentification/
             <scope>test</scope>
         </dependency>
     </dependencies>
+    <build>
+        <plugins>
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-compiler-plugin</artifactId>
+                <configuration>
+                    <annotationProcessorPaths>
+                        <path>
+                            <groupId>org.projectlombok</groupId>
+                            <artifactId>lombok</artifactId>
+                        </path>
+                    </annotationProcessorPaths>
+                </configuration>
+            </plugin>
+            <plugin>
+                <groupId>org.springframework.boot</groupId>
+                <artifactId>spring-boot-maven-plugin</artifactId>
+                <configuration>
+                    <excludes>
+                        <exclude>
+                            <groupId>org.projectlombok</groupId>
+                            <artifactId>lombok</artifactId>
+                        </exclude>
+                    </excludes>
+                </configuration>
+            </plugin>
+            <plugin>
+                <groupId>org.jacoco</groupId>
+                <artifactId>jacoco-maven-plugin</artifactId>
+                <version>0.8.11</version>
+                <executions>
+                    <execution>
+                        <goals>
+                            <goal>prepare-agent</goal>
+                        </goals>
+                    </execution>
+                    <execution>
+                        <id>report</id>
+                        <phase>test</phase>
+                        <goals>
+                            <goal>report</goal>
+                        </goals>
+                    </execution>
+                </executions>
+            </plugin>
+        </plugins>
+    </build>
 </project>
 ```
 
@@ -140,20 +207,24 @@ src/main/java/com/example/authentification/
 spring.application.name=authentification
 server.port=8080
 
+# Session HTTP : cookie JSESSIONID pour maintenir l'état "connecté"
 server.servlet.session.cookie.same-site=lax
 
-# MySQL - Port 3307, base auth_tp
+# --- Base de données MySQL ---
+# createDatabaseIfNotExist=true : crée la base auth_tp si elle n'existe pas
 spring.datasource.url=jdbc:mysql://localhost:3307/auth_tp?createDatabaseIfNotExist=true
 spring.datasource.username=root
 spring.datasource.password=VOTRE_MOT_DE_PASSE
 spring.datasource.driver-class-name=com.mysql.cj.jdbc.Driver
 
-# JPA / Hibernate
+# --- JPA / Hibernate ---
+# ddl-auto=none : on utilise schema.sql pour créer les tables, pas Hibernate
 spring.jpa.hibernate.ddl-auto=none
 spring.jpa.show-sql=false
 spring.jpa.properties.hibernate.dialect=org.hibernate.dialect.MySQLDialect
 
-# Initialisation SQL
+# --- Scripts SQL d'initialisation ---
+# Exécutés au démarrage : schema.sql (création tables) puis data.sql (compte de test)
 spring.sql.init.mode=always
 spring.sql.init.schema-locations=classpath:schema.sql
 spring.sql.init.data-locations=classpath:data.sql
@@ -208,47 +279,77 @@ import jakarta.persistence.*;
 import java.time.LocalDateTime;
 
 /**
- * Entité représentant un utilisateur dans le système d'authentification.
- * Cette implémentation est volontairement dangereuse et ne doit jamais
- * être utilisée en production. Les mots de passe sont stockés en clair.
+ * Entité JPA représentant un utilisateur dans le système d'authentification.
+ * <p>
+ * Objectif : mapper la table "users" de la base de données en objet Java.
+ * Chaque champ correspond à une colonne de la table.
+ * </p>
+ * <p>
+ * Cette implémentation est volontairement dangereuse et ne doit jamais être utilisée en production.
+ * Les mots de passe sont stockés en clair dans le champ {@code password_clear}.
+ * </p>
  */
 @Entity
-@Table(name = "users")
+@Table(name = "users")  // Nom de la table en base de données
 public class User {
 
-    @Id
-    @GeneratedValue(strategy = GenerationType.IDENTITY)
+    @Id  // Clé primaire
+    @GeneratedValue(strategy = GenerationType.IDENTITY)  // Auto-incrémenté par la BDD
     private Long id;
 
-    @Column(nullable = false, unique = true)
+    @Column(nullable = false, unique = true)  // Obligatoire et unique (pas de doublon)
     private String email;
 
-    @Column(name = "password_clear", nullable = false)
+    @Column(name = "password_clear", nullable = false)  // Nom de colonne différent en BDD
     private String passwordClear;
 
     @Column(name = "created_at")
     private LocalDateTime createdAt;
 
+    // S'exécute automatiquement avant chaque INSERT en base
     @PrePersist
     protected void onCreate() {
         createdAt = LocalDateTime.now();
     }
 
-    public User() {}
+    public User() {}  // Constructeur vide requis par JPA
 
     public User(String email, String passwordClear) {
         this.email = email;
         this.passwordClear = passwordClear;
     }
 
-    public Long getId() { return id; }
-    public void setId(Long id) { this.id = id; }
-    public String getEmail() { return email; }
-    public void setEmail(String email) { this.email = email; }
-    public String getPasswordClear() { return passwordClear; }
-    public void setPasswordClear(String passwordClear) { this.passwordClear = passwordClear; }
-    public LocalDateTime getCreatedAt() { return createdAt; }
-    public void setCreatedAt(LocalDateTime createdAt) { this.createdAt = createdAt; }
+    public Long getId() {
+        return id;
+    }
+
+    public void setId(Long id) {
+        this.id = id;
+    }
+
+    public String getEmail() {
+        return email;
+    }
+
+    public void setEmail(String email) {
+        this.email = email;
+    }
+
+    public String getPasswordClear() {
+        return passwordClear;
+    }
+
+    public void setPasswordClear(String passwordClear) {
+        this.passwordClear = passwordClear;
+    }
+
+    public LocalDateTime getCreatedAt() {
+        return createdAt;
+    }
+
+    public void setCreatedAt(LocalDateTime createdAt) {
+        this.createdAt = createdAt;
+    }
 }
 ```
 
@@ -344,42 +445,58 @@ import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
+
 import java.time.Instant;
 import java.util.Map;
 
-@RestControllerAdvice
+/**
+ * Gestionnaire global des exceptions (ControllerAdvice).
+ * <p>
+ * Objectif : intercepter toutes les exceptions levées par les contrôleurs et
+ * renvoyer des réponses JSON cohérentes (timestamp, status, error, message, path).
+ * Évite de dupliquer la gestion des erreurs dans chaque contrôleur.
+ * </p>
+ */
+@RestControllerAdvice  // S'applique à tous les @RestController
 public class GlobalExceptionHandler {
 
+    // Construit un objet JSON d'erreur standard
     private Map<String, Object> buildErrorResponse(HttpServletRequest request, HttpStatus status,
                                                    String error, String message) {
         return Map.of(
-            "timestamp", Instant.now().toString(),
-            "status", status.value(),
-            "error", error,
-            "message", message,
-            "path", request.getRequestURI()
+                "timestamp", Instant.now().toString(),
+                "status", status.value(),
+                "error", error,
+                "message", message,
+                "path", request.getRequestURI()
         );
     }
 
+    // Données invalides -> HTTP 400 Bad Request
     @ExceptionHandler(InvalidInputException.class)
     public ResponseEntity<Map<String, Object>> handleInvalidInput(InvalidInputException ex,
                                                                   HttpServletRequest request) {
-        return ResponseEntity.status(HttpStatus.BAD_REQUEST)
-            .body(buildErrorResponse(request, HttpStatus.BAD_REQUEST, "Bad Request", ex.getMessage()));
+        return ResponseEntity
+                .status(HttpStatus.BAD_REQUEST)
+                .body(buildErrorResponse(request, HttpStatus.BAD_REQUEST, "Bad Request", ex.getMessage()));
     }
 
+    // Login échoué -> HTTP 401 Unauthorized
     @ExceptionHandler(AuthenticationFailedException.class)
     public ResponseEntity<Map<String, Object>> handleAuthenticationFailed(AuthenticationFailedException ex,
                                                                           HttpServletRequest request) {
-        return ResponseEntity.status(HttpStatus.UNAUTHORIZED)
-            .body(buildErrorResponse(request, HttpStatus.UNAUTHORIZED, "Unauthorized", ex.getMessage()));
+        return ResponseEntity
+                .status(HttpStatus.UNAUTHORIZED)
+                .body(buildErrorResponse(request, HttpStatus.UNAUTHORIZED, "Unauthorized", ex.getMessage()));
     }
 
+    // Email déjà existant -> HTTP 409 Conflict
     @ExceptionHandler(ResourceConflictException.class)
     public ResponseEntity<Map<String, Object>> handleResourceConflict(ResourceConflictException ex,
                                                                       HttpServletRequest request) {
-        return ResponseEntity.status(HttpStatus.CONFLICT)
-            .body(buildErrorResponse(request, HttpStatus.CONFLICT, "Conflict", ex.getMessage()));
+        return ResponseEntity
+                .status(HttpStatus.CONFLICT)
+                .body(buildErrorResponse(request, HttpStatus.CONFLICT, "Conflict", ex.getMessage()));
     }
 }
 ```
@@ -541,31 +658,48 @@ import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 
 /**
- * Contrôleur REST pour l'authentification.
- * Cette implémentation est volontairement dangereuse et ne doit jamais
- * être utilisée en production.
+ * Contrôleur REST pour l'authentification (inscription et connexion).
+ * <p>
+ * Objectif : exposer les endpoints POST /api/auth/register et POST /api/auth/login.
+ * Reçoit les requêtes HTTP, délègue au service, retourne des réponses JSON.
+ * Utilise HttpSession pour stocker l'utilisateur connecté (cookie JSESSIONID).
+ * </p>
+ * <p>
+ * Cette implémentation est volontairement dangereuse et ne doit jamais être utilisée en production.
+ * </p>
  */
 @RestController
-@RequestMapping("/api/auth")
+@RequestMapping("/api/auth")  // Toutes les routes commencent par /api/auth
 public class AuthController {
 
+    // Clé pour stocker l'utilisateur en session (après login)
     private static final String SESSION_USER = "authUser";
+
     private final AuthService authService;
 
     public AuthController(AuthService authService) {
         this.authService = authService;
     }
 
+    /**
+     * Inscription : POST /api/auth/register
+     * Body JSON : {"email":"...", "password":"..."}
+     */
     @PostMapping("/register")
     public ResponseEntity<AuthResponse> register(@RequestBody RegisterRequest request) {
         authService.register(request);
         return ResponseEntity.ok(new AuthResponse(true, "Inscription réussie"));
     }
 
+    /**
+     * Connexion : POST /api/auth/login
+     * En cas de succès, stocke l'utilisateur en session pour que /api/me fonctionne.
+     * La session crée un cookie JSESSIONID envoyé automatiquement par le client.
+     */
     @PostMapping("/login")
     public ResponseEntity<AuthResponse> login(@RequestBody LoginRequest request, HttpSession session) {
         User user = authService.login(request);
-        session.setAttribute(SESSION_USER, user);
+        session.setAttribute(SESSION_USER, user);  // Lie l'utilisateur à la session
         return ResponseEntity.ok(new AuthResponse(true, "Connexion réussie"));
     }
 }
@@ -582,24 +716,38 @@ import com.example.authentification.dto.MeResponse;
 import com.example.authentification.entity.User;
 import jakarta.servlet.http.HttpSession;
 import org.springframework.http.ResponseEntity;
-import org.springframework.web.bind.annotation.*;
+import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.RestController;
 
 /**
- * Contrôleur pour la route protégée /api/me.
- * Cette implémentation est volontairement dangereuse et ne doit jamais
- * être utilisée en production.
+ * Contrôleur pour la route protégée GET /api/me.
+ * <p>
+ * Objectif : retourner les infos de l'utilisateur connecté.
+ * Protection simple : vérifie si un utilisateur est présent en session
+ * (mis par AuthController.login). Si non connecté -> 401 Unauthorized.
+ * </p>
+ * <p>
+ * Cette implémentation est volontairement dangereuse et ne doit jamais être utilisée en production.
+ * </p>
  */
 @RestController
 @RequestMapping("/api")
 public class MeController {
 
-    private static final String SESSION_USER = "authUser";
+    private static final String SESSION_USER = "authUser";  // Même clé que AuthController
 
+    /**
+     * GET /api/me - Route protégée
+     * Retourne {"id":..., "email":"..."} si connecté, 401 sinon.
+     * Le client doit envoyer le cookie de session (automatique après login).
+     */
     @GetMapping("/me")
     public ResponseEntity<MeResponse> me(HttpSession session) {
         User user = (User) session.getAttribute(SESSION_USER);
-        if (user == null)
-            return ResponseEntity.status(401).build();
+        if (user == null) {
+            return ResponseEntity.status(401).build();  // Non authentifié
+        }
         return ResponseEntity.ok(new MeResponse(user.getId(), user.getEmail()));
     }
 }
@@ -634,13 +782,21 @@ public class AuthentificationApplication {
 
 ```xml
 <?xml version="1.0" encoding="UTF-8"?>
+<!--
+  Logback : configuration du logging
+  Objectif : écrire les logs en console ET dans logs/auth-server.log
+  Pattern : date | thread | level | logger | message
+  IMPORTANT : ne jamais logger les mots de passe !
+-->
 <configuration>
+    <!-- Console : affichage dans le terminal -->
     <appender name="CONSOLE" class="ch.qos.logback.core.ConsoleAppender">
         <encoder>
             <pattern>%d{yyyy-MM-dd HH:mm:ss} [%thread] %-5level %logger{36} - %msg%n</pattern>
             <charset>UTF-8</charset>
         </encoder>
     </appender>
+    <!-- Fichier : logs/auth-server.log pour archivage -->
     <appender name="FILE" class="ch.qos.logback.core.FileAppender">
         <file>logs/auth-server.log</file>
         <encoder>
@@ -648,6 +804,7 @@ public class AuthentificationApplication {
             <charset>UTF-8</charset>
         </encoder>
     </appender>
+
     <root level="INFO">
         <appender-ref ref="CONSOLE"/>
         <appender-ref ref="FILE"/>
@@ -665,17 +822,24 @@ public class AuthentificationApplication {
 
 ### 9.1 `src/test/resources/application-test.properties`
 
-**Objectif :** Utiliser H2 au lieu de MySQL pour les tests. `create-drop` recrée le schéma à chaque test.
+**Objectif :** Utiliser H2 au lieu de MySQL pour les tests. `create-drop` recrée le schéma à chaque test. `MODE=MySQL` rapproche le comportement de MySQL ; `DB_CLOSE_DELAY=-1` garde la base en mémoire pendant toute la JVM.
 
 ```properties
-spring.datasource.url=jdbc:h2:mem:testdb
+# H2 pour les tests
+spring.datasource.url=jdbc:h2:mem:testdb;DB_CLOSE_DELAY=-1;MODE=MySQL
 spring.datasource.driver-class-name=org.h2.Driver
 spring.datasource.username=sa
 spring.datasource.password=
 
+# Laisser Hibernate créer les tables via les entités
 spring.jpa.hibernate.ddl-auto=create-drop
 spring.jpa.database-platform=org.hibernate.dialect.H2Dialect
+
+# Désactiver les scripts SQL externes (schema.sql/data.sql)
 spring.sql.init.mode=never
+
+# IMPORTANT : initialiser la datasource avant Hibernate
+spring.jpa.defer-datasource-initialization=false
 ```
 
 ### 9.2 `src/test/java/.../AuthControllerTest.java`
